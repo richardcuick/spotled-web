@@ -33,6 +33,9 @@
         <strong>Display Info: </strong><span id="display_info"></span>
     </p>
     <p>
+        <button id="draw">Draw</button>
+    </p>
+    <p>
         <label>Brightness: <input type="range" id="brightness" min="0" max="100" disabled/></label>
     </p>
     <p>
@@ -542,8 +545,6 @@
         }
     }
 
-
-
     class ContinueSendingResponse extends GenericCommandResponse {
         constructor(data) {
             super(data)
@@ -610,7 +611,10 @@
                 throw `senddata error: ${response.errorCode}`
             }
 
-            const sendSize = 20
+            // the most tricky part with fixed package size 182
+            //const sendSize = 20
+            const sendSize = 182
+
             const unackCount = Math.floor(this.bufferSize / sendSize)
             let sentPayloads = 0
 
@@ -779,7 +783,6 @@
         }
     }
 
-
     class SpotLED {
         constructor(device) {
             this.connection = new SpotLEDConnection(device)
@@ -831,10 +834,37 @@
         }
 
         async clearDisplay() {
-            const bitmap = new Uint8Array(Math.floor(this.connection.displayInfo.width * this.connection.displayInfo.height / 8))
+            //const bitmap = new Uint8Array(Math.floor(this.connection.displayInfo.width * this.connection.displayInfo.height / 8))
+            const bitmap = new Uint8Array(Math.floor(this.connection.displayInfo.width * this.connection.displayInfo.height * 3)) // width * height with RGB color of 3 bytes
             bitmap.fill(0x00)
-            const frames = [new FrameData(this.connection.displayInfo.width, this.connection.displayInfo.height, bitmap)]
+            //const frames = [new FrameData(this.connection.displayInfo.width, this.connection.displayInfo.height, bitmap)]
+            const frames = [new FrameData(this.connection.displayInfo.width, this.connection.displayInfo.height, bitmap, 24)] // color depth is 24 for RGB colors
             await this.connection.sendDataInternal(new SendDataCommand(32772, new AnimationData(frames, 0, 0, 0).serialize()))
+        }
+
+        // Sample method to demostrate how to fill the framewith color bitmap
+        async draw(){
+            let bitmap = genColorBitmap([
+                "11111111111111111111111111111111"+
+                "1..............................1"+
+                "1..............................1"+
+                "1........RRRRR........RRRR.....1"+
+                "1..............................1"+
+                "1......GGGG...........GGG......1"+
+                "1..............................1"+
+                "1............BBBBBB............1"+
+                "1...........R.......RGBRGBRGB..1"+
+                "1..............................1"+
+                "1..............................1"+
+                "1.......RGB....BBBB............1"+
+                "1..............................1"+
+                "1.............G................1"+
+                "1........GG....................1"+
+                "11111111111111111111111111111111"
+            ])
+
+            const frames = [new FrameData(this.connection.displayInfo.width, this.connection.displayInfo.height, bitmap, 24)]
+            await this.connection.sendDataInternal(new SendDataCommand(32772, new AnimationData(frames, 200, 0, 0).serialize()))
         }
     }
 
@@ -973,6 +1003,8 @@
 
         ctx.putImageData(imageData, 0, 0)
 
+        console.log("Byte Length:", imageData.data.byteLength)
+
         return imageData.data
     }
 
@@ -989,6 +1021,48 @@
             }
         }
         return bitmapData
+    }
+
+    // method to render bitmap with colorful matrix, you can define your own color with color map
+    function genColorBitmap(lines, colorMap = {'.': [0, 0, 0], '1': [255,255,255], 'R': [255, 255, 255], 'G': [0, 255, 0], 'B': [0, 0, 255]}) {
+        let data = [];
+
+        for(var j=0;j<lines.length;j++){
+            var text = lines[j]
+            console.log(text)
+            console.log(text.length)
+            for (let i = 0; i < text.length; i++) {
+                const color = colorMap[text[i]];
+                console.log(text[i],colorMap[text[i]])
+                data.push(color[0]); // Red
+                data.push(color[1]); // Green
+                data.push(color[2]); // Blue
+            }
+        }
+
+        // Convert the array of byte values into a Uint8Array and return it
+        return new Uint8Array(data); 
+    }
+
+    // method to convert 8 bit matrix to colorful matrix with RGB colors
+    function genColorBitmapFrom8Bit(bytes, colorMap = { "0" : [0, 0, 0], "1" : [255, 255, 255]}) {
+        let data = [];
+
+        for(var j=0;j<bytes.byteLength;j++){
+            var byte = bytes[j]
+            var text = byte.toString(2).padStart(8,'0')
+            console.log(byte, text)
+
+            for (let i = 0; i < text.length; i++) {
+                const color = colorMap[text[i]];
+                data.push(color[0]); // Red
+                data.push(color[1]); // Green
+                data.push(color[2]); // Blue
+            }
+        }
+
+        // Convert the array of byte values into a Uint8Array and return it
+        return new Uint8Array(data); 
     }
 
     function drawLine(context, x1, y1, x2, y2) {
@@ -1066,7 +1140,14 @@
 
         if (led) {
             const bitmapData = convertImageToBitmap(imageData)
-            await led.setBitmap(bitmapData)
+
+            const bitmapDataColor = genColorBitmapFrom8Bit(bitmapData)
+
+            console.log("bitmapData", bitmapData)
+            console.log("bitmapDataColor", bitmapDataColor)
+            
+            //await led.setBitmap(bitmapData)
+            await led.setBitmap(bitmapDataColor)
         }
     })
 
@@ -1102,6 +1183,11 @@
     document.querySelector('#clear').addEventListener('click', async (e) => {
         e.preventDefault()
         await led.clearDisplay()
+    })
+
+    document.querySelector('#draw').addEventListener('click', async (e) => {
+        e.preventDefault()
+        await led.draw()
     })
 
     document.querySelector('#font_size').addEventListener('input', (e) => {
